@@ -1,0 +1,22 @@
+Query: gula darah diabetes insulin
+Waktu generate: 2026-05-17 03:49:55
+
+HASIL PENCARIAN:
+
+1. 4 Cara Cepat Turunkan Kadar Gula Darah Saat Tiba-tiba Naik | ID=FAA-17
+Cosine Similarity: 0.320824
+Bagi penderita diabetes yang menggunakan insulin, langkah pertama adalah memastikan dosis tidak terlewat atau alat seperti pompa insulin berfungsi dengan baik. [6]
+Dengan pemberian insulin sesuai anjuran medis, glukosa dalam darah dapat lebih cepat masuk ke sel sehingga kadar gula menurun. [8]
+Hong menjelaskan bahwa setelah obat diminum kembali, kadar gula biasanya akan turun, meski tidak secepat insulin. [12]
+
+2. 4 Cara Cepat Turunkan Kadar Gula Darah Saat Tiba-tiba Naik | ID=DCM-1
+Cosine Similarity: 0.318931
+Bagi penderita diabetes yang menggunakan insulin, langkah pertama adalah memastikan dosis tidak terlewat atau alat seperti pompa insulin berfungsi dengan baik. [6]
+Dengan pemberian insulin sesuai anjuran medis, glukosa dalam darah dapat lebih cepat masuk ke sel sehingga kadar gula menurun. [8]
+Hong menjelaskan bahwa setelah obat diminum kembali, kadar gula biasanya akan turun, meski tidak secepat insulin. [12]
+
+3. Pengidap Diabetes Boleh Puasa, Tapi Ikuti 5 Saran Dokter Berikut | ID=DCM-11
+Cosine Similarity: 0.268182
+Diabetes seyogianya tak menjadi halangan bagi siapa pun yang ingin berpuasa. [0]
+Namun, bukan berarti pengidap diabetes dilarang berpuasa. [7]
+Hari juga memberikan beberapa saran untuk pengidap diabetes yang ingin berpuasa. [21]

@@ -2,6 +2,13 @@
 Tugas 4 - Pemerolehan Informasi dan Penambangan Teks
 Search Engine + Peringkasan Teks Extractive (TF-IDF From Scratch)
 
+Aplikasi ini adalah search engine berbasis web menggunakan Streamlit.
+Alur utama:
+  1. Baca & parsing corpus.txt
+  2. Preprocessing teks (lowercase, hapus stopword, stemming)
+  3. Bangun Inverted Index & hitung TF-IDF from scratch
+  4. Terima query pengguna → hitung cosine similarity → ranking dokumen
+  5. Tampilkan hasil beserta ringkasan extractive 3 kalimat terpenting
 """
 
 import json
@@ -9,15 +16,17 @@ import math
 import re
 from collections import Counter, defaultdict
 from datetime import datetime
-from html import escape
+from html import escape                  # Mencegah XSS saat menampilkan teks ke HTML
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote           # Encode URL agar aman dipakai di href
 
 import streamlit as st
 
 
 # ═══════════════════════════════════════════════════════════
 # PAGE CONFIG
+# Konfigurasi tampilan awal halaman Streamlit:
+# judul tab, ikon, lebar layout, dan sidebar disembunyikan.
 # ═══════════════════════════════════════════════════════════
 
 st.set_page_config(
@@ -30,17 +39,25 @@ st.set_page_config(
 
 # ═══════════════════════════════════════════════════════════
 # PATH CONFIG
+# Menentukan lokasi file corpus secara dinamis relatif
+# terhadap lokasi file app.py ini, agar portabel di
+# berbagai environment (lokal maupun server).
 # ═══════════════════════════════════════════════════════════
 
-BASE_DIR = Path(__file__).resolve().parent.parent
-DATA_DIR = BASE_DIR / "data"
-CORPUS_FILE = DATA_DIR / "corpus.txt"
+BASE_DIR = Path(__file__).resolve().parent.parent   # Dua level di atas folder app.py
+DATA_DIR = BASE_DIR / "data"                         # Folder penyimpanan corpus & output JSON
+CORPUS_FILE = DATA_DIR / "corpus.txt"               # File corpus utama
 
-DATA_DIR.mkdir(parents=True, exist_ok=True)
+DATA_DIR.mkdir(parents=True, exist_ok=True)          # Buat folder data jika belum ada
 
 
 # ═══════════════════════════════════════════════════════════
 # APP CONFIG
+# Konstanta konfigurasi untuk perilaku search engine:
+# - EXAMPLES   : query contoh yang ditampilkan di halaman utama
+# - TOP_K      : maksimal dokumen yang dikembalikan pencarian
+# - TOP_SUMMARIZE : jumlah dokumen teratas yang mendapat ringkasan extractive
+# - TOP_SENTENCES : jumlah kalimat per ringkasan
 # ═══════════════════════════════════════════════════════════
 
 EXAMPLES = [
@@ -57,6 +74,11 @@ TOP_SENTENCES = 3
 
 # ═══════════════════════════════════════════════════════════
 # CSS
+# Menyuntikkan CSS kustom ke halaman agar tampilan menyerupai
+# Google Search: input kotak bulat, warna teks standar, layout
+# responsif, dan kartu hasil pencarian yang bersih.
+# unsafe_allow_html=True diperlukan agar Streamlit mau
+# merender tag HTML mentah.
 # ═══════════════════════════════════════════════════════════
 
 st.markdown(
@@ -278,49 +300,111 @@ section[data-testid="stSidebar"] { display: none; }
 
 # ═══════════════════════════════════════════════════════════
 # ENGINE
+# Kumpulan fungsi inti search engine:
+# parsing, preprocessing, indexing, pencarian, dan peringkasan.
 # ═══════════════════════════════════════════════════════════
 
 def clean_article_text(text: str) -> str:
-    """Membersihkan artefak umum dari artikel berita."""
+    """
+    Membersihkan artefak umum dari artikel berita sebelum diindeks.
+
+    Menghapus:
+    - Teks iklan bawaan scraper: "ADVERTISEMENT SCROLL TO CONTINUE..."
+    - Tag gambar Detik: "[Gambas: ...]"
+    - Spasi berlebih akibat penghapusan di atas
+    """
     noise_patterns = [
         r"ADVERTISEMENT\s+SCROLL TO CONTINUE WITH CONTENT",
         r"\[Gambas:.*?\]",
     ]
 
     for pattern in noise_patterns:
+        # re.IGNORECASE → tidak peduli huruf besar/kecil
+        # re.DOTALL     → titik (.) juga cocok dengan newline
         text = re.sub(pattern, " ", text, flags=re.IGNORECASE | re.DOTALL)
 
+    # Ganti semua whitespace berurutan (spasi, tab, newline) dengan satu spasi
     text = re.sub(r"\s+", " ", text)
     return text.strip()
 
 
 def preprocess(text, sw, stem):
-    """Lowercase, hapus karakter non-alfanumerik, stopword removal, stemming."""
+    """
+    Mengubah teks mentah menjadi daftar token bersih untuk diindeks.
+
+    Tahapan:
+    1. Lowercase          – menyamakan "Diabetes" dan "diabetes"
+    2. Hapus non-alfanum  – buang tanda baca, simbol, dsb.
+    3. Stopword removal   – buang kata umum (dan, yang, di, …) via Sastrawi
+    4. Stemming           – kembalikan ke bentuk dasar (mengonsumsi → konsumsi)
+    5. Filter pendek      – buang token < 3 karakter yang biasanya tidak bermakna
+
+    Parameter:
+        text : teks yang akan diproses
+        sw   : objek StopWordRemover dari Sastrawi
+        stem : objek Stemmer dari Sastrawi
+
+    Return:
+        list of str – daftar token bersih
+    """
     text = text.lower()
-    text = re.sub(r"[^a-z0-9\s]", " ", text)
-    text = sw.remove(text)
-    text = stem.stem(text)
+    text = re.sub(r"[^a-z0-9\s]", " ", text)   # Hanya pertahankan huruf, angka, spasi
+    text = sw.remove(text)                       # Hapus stopword bahasa Indonesia
+    text = stem.stem(text)                       # Stemming ke bentuk dasar
     return [token for token in text.split() if len(token) >= 3]
 
 
 def split_sentences(text):
-    """Memecah artikel menjadi kalimat. Indeks kalimat dimulai dari 0."""
+    """
+    Memecah teks artikel menjadi daftar kalimat untuk keperluan peringkasan.
+
+    Pemecahan dilakukan berdasarkan tanda akhir kalimat (. ! ?)
+    yang diikuti oleh spasi. Kalimat terlalu pendek (≤ 20 karakter)
+    diabaikan karena kemungkinan bukan kalimat informatif.
+
+    Return:
+        list of (index, sentence_str)
+        index dimulai dari 0 dan mencerminkan urutan asli dalam teks.
+    """
     raw_sentences = re.split(r"(?<=[.!?])\s+", text.strip())
     return [
         (idx, sentence.strip())
         for idx, sentence in enumerate(raw_sentences)
-        if len(sentence.strip()) > 20
+        if len(sentence.strip()) > 20     # Abaikan kalimat terlalu pendek
     ]
 
 
 def parse_corpus(filepath):
-    """Parsing corpus berformat tag <DOC>, <ID>, <NIM>, <TITLE>, <URL>, <TEXT>."""
+    """
+    Membaca dan mem-parsing file corpus.txt dengan format tag XML sederhana.
+
+    Format yang didukung:
+        <DOC>
+            <ID>...</ID>
+            <NIM>...</NIM>
+            <TITLE>...</TITLE>
+            <URL>...</URL>
+            <TEXT>...</TEXT>
+        </DOC>
+
+    Setiap blok <DOC> diubah menjadi satu dictionary dokumen.
+    Teks artikel dibersihkan oleh clean_article_text() sebelum disimpan.
+
+    Return:
+        list of dict – daftar dokumen yang berhasil di-parsing
+
+    Raise:
+        ValueError – jika tidak ada satu pun dokumen valid yang ditemukan
+    """
     with open(filepath, "r", encoding="utf-8") as file:
         content = file.read()
 
     docs = []
 
+    # Temukan semua blok <DOC>...</DOC> menggunakan regex
     for block in re.findall(r"<DOC>(.*?)</DOC>", content, re.DOTALL | re.IGNORECASE):
+
+        # Helper lokal: ekstrak isi tag tertentu dari satu blok <DOC>
         def get_tag(tag):
             match = re.search(
                 rf"<{tag}>(.*?)</{tag}>",
@@ -332,6 +416,7 @@ def parse_corpus(filepath):
         doc_id = get_tag("ID")
         text = get_tag("TEXT")
 
+        # Hanya simpan dokumen yang memiliki ID dan TEXT (field wajib)
         if doc_id and text:
             docs.append(
                 {
@@ -339,7 +424,7 @@ def parse_corpus(filepath):
                     "nim": get_tag("NIM"),
                     "title": get_tag("TITLE"),
                     "url": get_tag("URL"),
-                    "text": clean_article_text(text),
+                    "text": clean_article_text(text),   # Bersihkan artefak iklan
                 }
             )
 
@@ -353,31 +438,61 @@ def parse_corpus(filepath):
 
 
 def build_engine(docs, sw, stem):
-    """Membangun inverted index, token dokumen, dan TF-IDF matrix from scratch."""
-    inverted_index = defaultdict(dict)
+    """
+    Membangun tiga struktur data inti search engine dari kumpulan dokumen:
+
+    1. inverted_index  – peta term → {doc_id: frekuensi}
+       Memungkinkan candidate retrieval yang cepat: dari query term,
+       langsung ketahui dokumen mana yang mengandungnya.
+
+    2. document_tokens – peta doc_id → [daftar token]
+       Disimpan untuk keperluan perhitungan TF per dokumen.
+
+    3. tfidf_matrix    – peta doc_id → {term: skor_tfidf}
+       Representasi vektor setiap dokumen dalam ruang TF-IDF,
+       digunakan saat menghitung cosine similarity.
+
+    Rumus TF (logaritmik):
+        TF(t, d) = 1 + log10(count(t, d))   jika count > 0
+
+    Rumus IDF:
+        IDF(t) = log10(N / df(t))
+        N   = total dokumen
+        df  = jumlah dokumen yang mengandung term t
+
+    Return:
+        (inverted_index, document_tokens, tfidf_matrix)
+    """
+    inverted_index = defaultdict(dict)   # defaultdict agar key baru otomatis dibuat
     document_tokens = {}
     num_docs = len(docs)
 
+    # ── Tahap 1: Bangun inverted index ──────────────────────────────────────
     for doc in docs:
+        # Gabungkan judul dan isi agar judul ikut berkontribusi pada bobot term
         tokens = preprocess(doc["title"] + " " + doc["text"], sw, stem)
         document_tokens[doc["id"]] = tokens
 
+        # Counter menghitung frekuensi setiap term dalam dokumen ini
         for term, freq in Counter(tokens).items():
             inverted_index[term][doc["id"]] = freq
 
-    inverted_index = dict(inverted_index)
+    inverted_index = dict(inverted_index)  # Konversi ke dict biasa
     tfidf_matrix = {}
 
+    # ── Tahap 2: Hitung TF-IDF untuk setiap dokumen ─────────────────────────
     for doc in docs:
         doc_id = doc["id"]
         tokens = document_tokens[doc_id]
         tfidf_matrix[doc_id] = {}
 
-        for term in set(tokens):
+        for term in set(tokens):   # set() agar setiap term hanya dihitung sekali
             count = tokens.count(term)
             tf = 1 + math.log10(count) if count > 0 else 0.0
-            df = len(inverted_index.get(term, {}))
+
+            df = len(inverted_index.get(term, {}))              # Jumlah dokumen yang mengandung term
             idf = math.log10(num_docs / df) if df > 0 else 0.0
+
             tfidf_matrix[doc_id][term] = tf * idf
 
     return inverted_index, document_tokens, tfidf_matrix
@@ -386,11 +501,24 @@ def build_engine(docs, sw, stem):
 @st.cache_resource(show_spinner=False)
 def load_engine_cached(corpus_path: str, modified_time: float):
     """
-    Cache engine agar:
-    - klik contoh query tidak perlu memuat indeks ulang;
-    - browser Back/Forward tetap aman;
-    - refresh halaman tidak langsung mengulang komputasi selama corpus tidak berubah.
+    Memuat dan membangun seluruh engine, lalu meng-cache hasilnya di memori.
+
+    @st.cache_resource memastikan fungsi ini hanya dieksekusi SEKALI
+    selama server Streamlit hidup (atau sampai corpus berubah).
+    Parameter `modified_time` (mtime file) digunakan sebagai cache key:
+    jika corpus.txt diperbarui, cache otomatis tidak valid dan engine
+    dibangun ulang.
+
+    Manfaat caching:
+    - Klik contoh query tidak perlu memuat indeks ulang
+    - Browser Back/Forward tetap aman
+    - Refresh halaman tidak mengulang komputasi berat selama corpus sama
+
+    Hasil indexing juga disimpan ke file JSON di DATA_DIR untuk keperluan
+    inspeksi/debugging di luar aplikasi.
     """
+    # Import Sastrawi di sini (bukan di atas) agar tidak memperlambat
+    # startup jika Sastrawi belum terinstal
     from Sastrawi.StopWordRemover.StopWordRemoverFactory import StopWordRemoverFactory
     from Sastrawi.Stemmer.StemmerFactory import StemmerFactory
 
@@ -400,6 +528,7 @@ def load_engine_cached(corpus_path: str, modified_time: float):
     docs = parse_corpus(Path(corpus_path))
     inv, dtok, tfidf = build_engine(docs, sw, stem)
 
+    # Simpan hasil indexing ke JSON sebagai snapshot / output tugas
     with open(DATA_DIR / "inverted_index.json", "w", encoding="utf-8") as file:
         json.dump(inv, file, ensure_ascii=False, indent=2)
 
@@ -413,13 +542,31 @@ def load_engine_cached(corpus_path: str, modified_time: float):
 
 
 def do_search(query, docs, dtok, tfidf, inv, sw, stem, top_k=10):
-    """Pencarian dokumen dengan Vector Space Model dan cosine similarity."""
+    """
+    Mencari dokumen yang relevan menggunakan Vector Space Model (VSM).
+
+    Algoritma:
+    1. Preprocess query → daftar token
+    2. Hitung vektor TF-IDF query (formula sama dengan dokumen)
+    3. Candidate retrieval via inverted index (hanya dokumen yang
+       mengandung setidaknya satu term query yang dievaluasi)
+    4. Hitung cosine similarity antara vektor query dan setiap kandidat:
+           cos(q, d) = (q · d) / (|q| × |d|)
+    5. Urutkan kandidat dari similarity tertinggi, ambil top_k
+
+    Menggunakan cosine similarity (bukan dot product mentah) agar
+    dokumen panjang tidak otomatis menang hanya karena lebih banyak kata.
+
+    Return:
+        list of dict dengan key: rank, doc_id, score, title, text, url
+    """
     num_docs = len(docs)
     query_tokens = preprocess(query, sw, stem)
 
     if not query_tokens:
-        return []
+        return []   # Query kosong setelah preprocessing → tidak ada hasil
 
+    # ── Bangun vektor TF-IDF query ──────────────────────────────────────────
     query_vector = {}
 
     for term in set(query_tokens):
@@ -429,23 +576,30 @@ def do_search(query, docs, dtok, tfidf, inv, sw, stem, top_k=10):
         idf = math.log10(num_docs / df) if df > 0 else 0.0
         query_vector[term] = tf * idf
 
+    # ── Candidate retrieval: kumpulkan doc_id dari posting list ─────────────
+    # Hanya dokumen yang mengandung minimal satu term query yang dievaluasi,
+    # sehingga tidak perlu iterasi semua dokumen di korpus.
     candidates = set()
     for term in query_tokens:
         candidates.update(inv.get(term, {}).keys())
 
+    # Hitung panjang vektor query satu kali di luar loop (efisiensi)
     query_norm = math.sqrt(sum(value ** 2 for value in query_vector.values()))
     if query_norm == 0:
         return []
 
+    # ── Hitung cosine similarity untuk setiap kandidat ──────────────────────
     scores = []
 
     for doc_id in candidates:
         doc_vector = tfidf.get(doc_id, {})
-        common_terms = set(query_vector) & set(doc_vector)
 
+        # Dot product: hanya term yang ada di KEDUA vektor (intersection)
+        common_terms = set(query_vector) & set(doc_vector)
         dot_product = sum(query_vector[t] * doc_vector[t] for t in common_terms)
+
         if dot_product == 0:
-            continue
+            continue   # Tidak ada overlap bermakna → lewati
 
         doc_norm = math.sqrt(sum(value ** 2 for value in doc_vector.values()))
         if doc_norm == 0:
@@ -453,7 +607,10 @@ def do_search(query, docs, dtok, tfidf, inv, sw, stem, top_k=10):
 
         scores.append((doc_id, dot_product / (query_norm * doc_norm)))
 
+    # Urutkan dari similarity tertinggi ke terendah
     scores.sort(key=lambda item: item[1], reverse=True)
+
+    # Buat lookup doc_id → dokumen untuk efisiensi
     doc_map = {doc["id"]: doc for doc in docs}
 
     return [
@@ -470,7 +627,30 @@ def do_search(query, docs, dtok, tfidf, inv, sw, stem, top_k=10):
 
 
 def summarize(text, tfidf_vec, sw, stem, top_n=3):
-    """Extractive summarization berbasis rata-rata skor TF-IDF kalimat."""
+    """
+    Menghasilkan ringkasan teks extractive berbasis TF-IDF.
+
+    Ide dasar: kalimat yang mengandung banyak kata dengan skor TF-IDF
+    tinggi dianggap lebih informatif/penting.
+
+    Algoritma:
+    1. Pecah teks menjadi kalimat via split_sentences()
+    2. Preprocessing setiap kalimat → daftar token
+    3. Skor kalimat = rata-rata TF-IDF semua tokennya
+       (rata-rata, bukan jumlah, agar kalimat panjang tidak selalu menang)
+    4. Pilih top_n kalimat dengan skor tertinggi
+    5. Urutkan ulang berdasarkan posisi asli (bukan skor) agar
+       ringkasan terbaca natural mengikuti alur teks
+
+    Parameter:
+        text      : teks dokumen asli
+        tfidf_vec : dict {term: skor_tfidf} dari dokumen tersebut
+        sw, stem  : objek Sastrawi untuk preprocessing
+        top_n     : jumlah kalimat yang dipilih
+
+    Return:
+        list of dict: [{'index': int, 'sentence': str, 'score': float}, ...]
+    """
     sentences = split_sentences(text)
 
     if not sentences:
@@ -482,8 +662,9 @@ def summarize(text, tfidf_vec, sw, stem, top_n=3):
         tokens = preprocess(sentence, sw, stem)
 
         if not tokens:
-            continue
+            continue   # Kalimat tidak punya token bermakna → lewati
 
+        # Rata-rata TF-IDF: adil untuk kalimat pendek maupun panjang
         score = sum(tfidf_vec.get(token, 0) for token in tokens) / len(tokens)
 
         scored_sentences.append(
@@ -494,18 +675,34 @@ def summarize(text, tfidf_vec, sw, stem, top_n=3):
             }
         )
 
+    # Ambil top_n kalimat berdasarkan skor tertinggi
     top_sentences = sorted(
         scored_sentences,
         key=lambda item: item["score"],
         reverse=True,
     )[:top_n]
 
+    # Kembalikan ke urutan kemunculan asli dalam teks
     top_sentences.sort(key=lambda item: item["index"])
     return top_sentences
 
 
 def save_search_summary_output(query, results, tfidf, sw, stem, output_path):
-    """Menyimpan hasil pencarian dan ringkasan 3 dokumen teratas ke file TXT."""
+    """
+    Menyimpan hasil pencarian beserta ringkasan 3 dokumen teratas ke file TXT.
+
+    File ini nantinya disediakan sebagai tombol download di halaman hasil.
+    Format output:
+        Query: ...
+        Waktu generate: ...
+
+        HASIL PENCARIAN:
+        1. <judul> | ID=<id>
+        Cosine Similarity: ...
+        <kalimat ringkasan 1> [indeks]
+        <kalimat ringkasan 2> [indeks]
+        ...
+    """
     lines = []
     lines.append(f"Query: {query}")
     lines.append(f"Waktu generate: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
@@ -513,6 +710,7 @@ def save_search_summary_output(query, results, tfidf, sw, stem, output_path):
     lines.append("HASIL PENCARIAN:")
     lines.append("")
 
+    # Hanya proses TOP_SUMMARIZE dokumen teratas
     for result in results[:TOP_SUMMARIZE]:
         lines.append(f"{result['rank']}. {result['title']} | ID={result['doc_id']}")
         lines.append(f"Cosine Similarity: {result['score']:.6f}")
@@ -527,11 +725,12 @@ def save_search_summary_output(query, results, tfidf, sw, stem, output_path):
 
         if summary:
             for sentence in summary:
+                # Format: kalimat [nomor_urut_asli]
                 lines.append(f"{sentence['sentence']} [{sentence['index']}]")
         else:
             lines.append("(Ringkasan tidak tersedia)")
 
-        lines.append("")
+        lines.append("")   # Baris kosong sebagai pemisah antar dokumen
 
     with open(output_path, "w", encoding="utf-8") as file:
         file.write("\n".join(lines))
@@ -539,8 +738,10 @@ def save_search_summary_output(query, results, tfidf, sw, stem, output_path):
 
 # ═══════════════════════════════════════════════════════════
 # UI HELPERS
+# Fungsi-fungsi pembantu untuk merender elemen antarmuka.
 # ═══════════════════════════════════════════════════════════
 
+# Warna dan huruf logo "INFO" (meniru palet Google)
 LOGO_COLORS = [
     ("#4285F4", "I"),
     ("#EA4335", "N"),
@@ -550,6 +751,16 @@ LOGO_COLORS = [
 
 
 def logo_html(size="72px", mb="32px", clickable=False):
+    """
+    Menghasilkan HTML logo teks berwarna "INFO".
+
+    Parameter:
+        size      : ukuran font logo
+        mb        : margin bawah logo
+        clickable : jika True, logo dibungkus <a href="/"> sehingga
+                    dapat diklik untuk kembali ke halaman utama
+    """
+    # Bangun deretan <span> berwarna untuk tiap huruf
     spans = "".join(
         f'<span style="color:{color}">{letter}</span>'
         for color, letter in LOGO_COLORS
@@ -565,6 +776,11 @@ def logo_html(size="72px", mb="32px", clickable=False):
 
 
 def inject_center_css():
+    """
+    Menyuntikkan CSS tambahan untuk memusatkan konten halaman secara vertikal
+    dan horizontal. Dipakai khusus di halaman utama (mode 'home') agar
+    tampak seperti halaman Google yang bersih di tengah layar.
+    """
     st.markdown(
         """
 <style>
@@ -597,6 +813,7 @@ def inject_center_css():
 
 
 def render_footer():
+    """Merender footer berisi nama anggota kelompok di bagian bawah halaman."""
     st.markdown(
         """
 <div class="page-footer">
@@ -612,16 +829,28 @@ def render_footer():
 
 
 def set_query_param(query: str):
+    """
+    Menyimpan query ke URL parameter ?q=...
+    Ini memungkinkan tombol browser Back/Forward bekerja dengan benar,
+    dan URL hasil pencarian bisa di-bookmark atau dibagikan.
+    """
     st.query_params["q"] = query
 
 
 def get_query_param() -> str:
+    """
+    Membaca nilai parameter ?q= dari URL.
+    Mengembalikan string kosong jika parameter tidak ada.
+    """
     value = st.query_params.get("q", "")
     return value.strip() if isinstance(value, str) else ""
 
 
 # ═══════════════════════════════════════════════════════════
 # LOAD ENGINE
+# Blok ini dieksekusi setiap kali halaman dimuat.
+# Jika corpus tidak ditemukan, tampilkan pesan error dan hentikan eksekusi.
+# Jika ada, muat engine (dari cache jika corpus tidak berubah).
 # ═══════════════════════════════════════════════════════════
 
 if not CORPUS_FILE.exists():
@@ -631,17 +860,21 @@ if not CORPUS_FILE.exists():
         f"File `{CORPUS_FILE}` tidak ditemukan. "
         "Taruh corpus.txt di folder data/corpus.txt lalu refresh."
     )
-    st.stop()
+    st.stop()   # Hentikan eksekusi Streamlit, jangan lanjut ke bawah
 
+# Tampilkan spinner selama proses loading (hanya muncul saat cache kosong)
 with st.spinner("Memuat indeks TF-IDF dari corpus..."):
     docs, inv, dtok, tfidf, sw, stem = load_engine_cached(
         str(CORPUS_FILE),
-        CORPUS_FILE.stat().st_mtime,
+        CORPUS_FILE.stat().st_mtime,   # mtime dipakai sebagai cache key
     )
 
 
 # ═══════════════════════════════════════════════════════════
 # ROUTING
+# Menentukan halaman mana yang ditampilkan berdasarkan query URL.
+# - mode "home"    : halaman utama (tidak ada ?q= di URL)
+# - mode "results" : halaman hasil pencarian (?q=<query> ada di URL)
 # ═══════════════════════════════════════════════════════════
 
 query = get_query_param()
@@ -650,33 +883,40 @@ mode = "results" if query else "home"
 
 # ═══════════════════════════════════════════════════════════
 # HOME PAGE
+# Tampilan halaman utama: logo besar, kotak pencarian,
+# dan chip contoh query di tengah layar.
 # ═══════════════════════════════════════════════════════════
 
 if mode == "home":
     inject_center_css()
 
+    # Logo besar di tengah atas
     st.markdown(logo_html("72px", "48px"), unsafe_allow_html=True)
 
+    # Layout kolom: margin kiri | area input | margin kanan
     outer_cols = st.columns([1.4, 5.8, 1.4])
 
     with outer_cols[1]:
+        # Kolom input teks (lebih lebar) dan tombol Cari (lebih sempit)
         inner_cols = st.columns([6, 1.2], gap="small")
 
         with inner_cols[0]:
             home_query_input = st.text_input(
                 "q",
                 placeholder="Cari apa saja…",
-                label_visibility="collapsed",
+                label_visibility="collapsed",   # Sembunyikan label bawaan Streamlit
                 key="home_query_input",
             )
 
         with inner_cols[1]:
             home_search_clicked = st.button("Cari", key="go_home")
 
+    # Jika tombol diklik dan input tidak kosong, simpan ke URL param lalu reload
     if home_search_clicked and home_query_input.strip():
         set_query_param(home_query_input.strip())
-        st.rerun()
+        st.rerun()   # Muat ulang halaman → mode berubah ke "results"
 
+    # Label "Coba kueri ini:" di atas chip
     st.markdown(
         """
 <div style="
@@ -691,11 +931,14 @@ if mode == "home":
         unsafe_allow_html=True,
     )
 
+    # Baris chip pertama: 3 contoh query pertama sebagai <a> tag
+    # Menggunakan href agar browser Back berfungsi (bukan st.button)
     chip_1 = "".join(
         f'<a class="example-chip" href="/?q={quote(example)}" target="_self">{escape(example)}</a>'
         for example in EXAMPLES[:3]
     )
 
+    # Baris chip kedua: contoh query ke-4 (baris terpisah untuk keseimbangan visual)
     chip_2 = (
         f'<a class="example-chip" href="/?q={quote(EXAMPLES[3])}" '
         f'target="_self">{escape(EXAMPLES[3])}</a>'
@@ -715,6 +958,7 @@ if mode == "home":
         unsafe_allow_html=True,
     )
 
+    # Statistik corpus kecil di bawah chip
     st.markdown(
         f"""
         <div style="
@@ -734,9 +978,13 @@ if mode == "home":
 
 # ═══════════════════════════════════════════════════════════
 # RESULTS PAGE
+# Halaman hasil pencarian: logo kecil di kiri, kotak pencarian
+# di tengah, lalu daftar hasil dengan ringkasan atau snippet.
 # ═══════════════════════════════════════════════════════════
 
 else:
+    # Override CSS container agar layout berubah ke mode halaman hasil
+    # (tidak lagi center vertikal, tapi mulai dari atas)
     st.markdown(
         """
 <style>
@@ -752,15 +1000,18 @@ else:
         unsafe_allow_html=True,
     )
 
+    # Header: logo kecil | input pencarian | tombol Cari
     col_logo, col_search, col_btn = st.columns([1, 6, 1])
 
     with col_logo:
+        # Logo kecil yang bisa diklik untuk kembali ke home
         st.markdown(
             f'<div style="padding-top:14px;">{logo_html("22px", "0", clickable=True)}</div>',
             unsafe_allow_html=True,
         )
 
     with col_search:
+        # Input pencarian pre-filled dengan query saat ini dari URL
         results_query_input = st.text_input(
             "q",
             value=query,
@@ -772,17 +1023,21 @@ else:
     with col_btn:
         results_search_clicked = st.button("Cari", key="go_results")
 
+    # Jika pengguna mengetik query baru dan klik Cari → update URL & reload
     if results_search_clicked and results_query_input.strip():
         set_query_param(results_query_input.strip())
         st.rerun()
 
+    # Garis pemisah tipis di bawah search bar
     st.markdown(
         '<hr style="border:none;border-top:1px solid #efefef;margin:4px 0 0;">',
         unsafe_allow_html=True,
     )
 
+    # ── Jalankan pencarian ────────────────────────────────────────────────────
     results = do_search(query, docs, dtok, tfidf, inv, sw, stem, TOP_K)
 
+    # Simpan hasil ke file TXT (untuk tombol download) jika ada hasil
     if results:
         save_search_summary_output(
             query=query,
@@ -793,6 +1048,7 @@ else:
             output_path=DATA_DIR / "search_summary_output.txt",
         )
 
+    # Teks jumlah hasil: "Sekitar N hasil untuk ..."
     count_str = f"Sekitar {len(results)}" if results else "0"
 
     st.markdown(
@@ -801,6 +1057,7 @@ else:
         unsafe_allow_html=True,
     )
 
+    # ── Tampilan jika tidak ada hasil ────────────────────────────────────────
     if not results:
         st.markdown(
             """
@@ -815,15 +1072,17 @@ else:
             unsafe_allow_html=True,
         )
 
+    # ── Tampilan tiap kartu hasil ─────────────────────────────────────────────
     else:
         for result in results:
             rank = result["rank"]
-            is_top = rank <= TOP_SUMMARIZE
+            is_top = rank <= TOP_SUMMARIZE   # 3 teratas mendapat ringkasan extractive
             doc_id = escape(result["doc_id"])
             title = escape(result["title"] or "(Tanpa Judul)")
             url = escape(result["url"] or f"doc/{result['doc_id']}")
 
             if is_top:
+                # ── Ringkasan extractive untuk 3 dokumen teratas ──────────────
                 summary = summarize(
                     result["text"],
                     tfidf.get(result["doc_id"], {}),
@@ -832,6 +1091,8 @@ else:
                     TOP_SENTENCES,
                 )
 
+                # Render tiap kalimat ringkasan dalam grid dua kolom:
+                # [nomor urut asli] | [isi kalimat + skor]
                 rows = "".join(
                     f"""
 <div class="sent-row">
@@ -847,9 +1108,11 @@ else:
                 body = f'<span class="summary-label">Ringkasan extractive</span>{rows}'
 
             else:
+                # ── Snippet 220 karakter pertama untuk hasil ke-4 dst. ─────────
                 snippet = escape(result["text"][:220].strip())
                 body = f'<div class="result-snippet">{snippet}…</div>'
 
+            # Render satu kartu hasil pencarian
             st.markdown(
                 f"""
 <div class="result-item">
@@ -864,6 +1127,7 @@ else:
                 unsafe_allow_html=True,
             )
 
+    # ── Tombol download hasil ─────────────────────────────────────────────────
     output_file = DATA_DIR / "search_summary_output.txt"
 
     if output_file.exists():

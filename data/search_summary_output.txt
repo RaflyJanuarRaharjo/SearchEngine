@@ -1,22 +1,22 @@
-Query: gula darah diabetes insulin
-Waktu generate: 2026-05-17 03:49:55
+Query: vaksin campak imunisasi anak
+Waktu generate: 2026-05-17 13:28:46
 
 HASIL PENCARIAN:
 
-1. 4 Cara Cepat Turunkan Kadar Gula Darah Saat Tiba-tiba Naik | ID=FAA-17
-Cosine Similarity: 0.320824
-Bagi penderita diabetes yang menggunakan insulin, langkah pertama adalah memastikan dosis tidak terlewat atau alat seperti pompa insulin berfungsi dengan baik. [6]
-Dengan pemberian insulin sesuai anjuran medis, glukosa dalam darah dapat lebih cepat masuk ke sel sehingga kadar gula menurun. [8]
-Hong menjelaskan bahwa setelah obat diminum kembali, kadar gula biasanya akan turun, meski tidak secepat insulin. [12]
+1. Sering Dianggap Sama, Dokter Jelaskan Beda Ruam Campak dan Cacar Air | ID=DCM-2
+Cosine Similarity: 0.336567
+Campak belakangan jadi sorotan. [0]
+Ruam pada campak biasanya berupa bercak-bercak merah yang tampak lebih besar dan menyatu di beberapa bagian kulit. [8]
+Piprim juga mengingatkan bahwa campak dapat terjadi pada semua kelompok usia. [10]
 
-2. 4 Cara Cepat Turunkan Kadar Gula Darah Saat Tiba-tiba Naik | ID=DCM-1
-Cosine Similarity: 0.318931
-Bagi penderita diabetes yang menggunakan insulin, langkah pertama adalah memastikan dosis tidak terlewat atau alat seperti pompa insulin berfungsi dengan baik. [6]
-Dengan pemberian insulin sesuai anjuran medis, glukosa dalam darah dapat lebih cepat masuk ke sel sehingga kadar gula menurun. [8]
-Hong menjelaskan bahwa setelah obat diminum kembali, kadar gula biasanya akan turun, meski tidak secepat insulin. [12]
+2. Sering Dianggap Sama, Dokter Jelaskan Beda Ruam Campak dan Cacar Air | ID=FAA-20
+Cosine Similarity: 0.336567
+Campak belakangan jadi sorotan. [0]
+Ruam pada campak biasanya berupa bercak-bercak merah yang tampak lebih besar dan menyatu di beberapa bagian kulit. [8]
+Piprim juga mengingatkan bahwa campak dapat terjadi pada semua kelompok usia. [10]
 
-3. Pengidap Diabetes Boleh Puasa, Tapi Ikuti 5 Saran Dokter Berikut | ID=DCM-11
-Cosine Similarity: 0.268182
-Diabetes seyogianya tak menjadi halangan bagi siapa pun yang ingin berpuasa. [0]
-Namun, bukan berarti pengidap diabetes dilarang berpuasa. [7]
-Hari juga memberikan beberapa saran untuk pengidap diabetes yang ingin berpuasa. [21]
+3. Menkes soal Selebgram Keluyuran saat Sakit Campak: Colek IG-nya, Jangan Keluar-keluar | ID=RBN-11
+Cosine Similarity: 0.237802
+"Kira-kira kasihan yang lainnya. [5]
+Kan campak itu penularannya paling tinggi soalnya," ujarnya. [6]
+"Saya sudah memeriksakan diri ke UGD dan sempat meminta untuk opname. [14]
